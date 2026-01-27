@@ -6,9 +6,13 @@ import pandas as pd
 import logging
 import math
 from typing import Optional, Dict, Any
-
+import time
+import os
+from dotenv import load_dotenv
+from bs4 import BeautifulSoup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+load_dotenv()
 
 
 class StockAPIHandler:
@@ -302,7 +306,143 @@ class ATCODERAPIHANDLER:
         with open("data/json/atcoder/merged-problems.json", "r") as f:
             data = json.load(f)
             return random.choice(data)
+        
+    async def fetch_user_submissions(self, handle, from_time: int=int(time.time()) - 10000):
+        url = self.BASE_URL + "atcoder-api/v3/user/submissions"
+        params = {
+            "user": handle,
+            "from_second": from_time
+        }
+        try:
+            async with aiohttp.ClientSession(timeout=self.timeout) as session:
+                async with session.get(
+                    url,
+                    params = params
+                ) as resp:
+                    resp.raise_for_status()
+                    data = await resp.json()
+                    return data
+        except aiohttp.ClientError as e:
+            logger.error(f"API request failed for problems-model: {e}")
 
+
+
+    def __parse_atcoder_submissions(self, html_content):
+        """
+        Parses AtCoder submission HTML and returns a list of submission dictionaries.
+        """
+        soup = BeautifulSoup(html_content, 'html.parser')
+        submissions = []
+
+        # Find the main submissions table
+        table = soup.find('table', class_='table-bordered')
+        
+        if not table:
+            return []
+
+        # Iterate through the table body rows
+        rows = table.find('tbody').find_all('tr')
+
+        for row in rows:
+            cols = row.find_all('td')
+            if not cols:
+                continue
+
+            try:
+                # 1. Submission Time
+                time_str = cols[0].get_text(strip=True)
+
+                # 2. Task (e.g., "A - Swapping Game")
+                task = cols[1].get_text(strip=True)
+
+                # 3. User
+                user = cols[2].get_text(strip=True)
+
+                # 4. Language
+                language = cols[3].get_text(strip=True)
+
+                # 5. Score
+                score = cols[4].get_text(strip=True)
+
+                # 6. Code Size
+                code_size = cols[5].get_text(strip=True)
+
+                # 7. Status (AC, WA, CE, etc.)
+                # The status is usually inside a span with class 'label'
+                status_span = cols[6].find('span', class_='label')
+                status = status_span.get_text(strip=True) if status_span else cols[6].get_text(strip=True)
+
+                # 8. & 9. Execution Time and Memory
+                # Note: If Status is "CE" (Compilation Error), AtCoder uses colspan='3',
+                # meaning Exec Time and Memory columns do not exist for that row.
+                if cols[6].has_attr('colspan'):
+                    exec_time = None
+                    memory = None
+                    detail_col_index = 7 # Detail link shifts left
+                else:
+                    exec_time = cols[7].get_text(strip=True)
+                    memory = cols[8].get_text(strip=True)
+                    detail_col_index = 9
+
+                # 10. Submission ID (Extract from the "Detail" link)
+                # The link is usually /contests/arcXXX/submissions/12345678
+                detail_link = row.find_all('td')[-1].find('a')
+                submission_id = None
+                if detail_link and 'href' in detail_link.attrs:
+                    href = detail_link['href']
+                    submission_id = href.split('/')[-1]
+
+                submissions.append({
+                    'id': submission_id,
+                    'time': time_str,
+                    'task': task,
+                    'user': user,
+                    'language': language,
+                    'score': score,
+                    'code_size': code_size,
+                    'status': status,
+                    'exec_time': exec_time,
+                    'memory': memory
+                })
+
+            except IndexError:
+                # Skip malformed rows
+                continue
+
+        return submissions
+
+    async def fetch_contest_submissions(self, contestid):
+        referrer = f"https://atcoder.jp/contests/{contestid}/submissions"
+        url = referrer
+        user_agent = os.getenv('USER_AGENT', 'Mozilla/5.0')
+        cookie_value = os.getenv('ATCODER_COOKIE', '')
+
+        headers = {
+            'User-Agent': user_agent,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'Referer': referrer,  # Assumes 'referrer' variable is defined earlier in your code
+            'Connection': 'keep-alive',
+            'Cookie': cookie_value,
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'same-origin',
+            'Priority': 'u=0, i',
+            'TE': 'trailers',
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                # print(f"Status: {response.status}")
+                
+                # Read the response body
+                html = await response.text()
+                # print(f"Body length: {len(html)}")
+                # print(html)
+                return (self.__parse_atcoder_submissions(html))
+                # print(html) # Uncomment to see the full content
 
 
 
@@ -375,6 +515,20 @@ class CPAPIHANDLER:
         data = await self.cf_api.fetch_all_problems() | await self.atcoder_api.fetch_all_problems()
         with open("data/json/problems.json", "w", encoding="utf-8") as f:
             json.dump(data,f, indent=4)
+
+
+    async def fetch_user_submission(self, handle, platform):
+        if platform == "cf":
+            return await self.cf_api.fetch_user_submission(handle)
+        elif platform == "at": 
+            return await self.atcoder_api.fetch_user_submissions(handle)
+
+    async def at_fetch_contest(self, contestid):
+        return await self.atcoder_api.fetch_contest_submissions(contestid)
+
+    async def fetch_user_info(self, handle, platform):
+        if platform == "cf":
+            return await self.cf_api.fetch_user_info(handle)
 
 async def main():
     pass

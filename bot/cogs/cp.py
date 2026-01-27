@@ -3,6 +3,7 @@ from discord.ext.commands import Context
 import discord
 import asyncio
 import datetime,time
+import random
 from services.api_handler import CPAPIHANDLER
 import os
 import json
@@ -10,7 +11,6 @@ import json
 owner_id = os.getenv('OWNER_ID')
 
 # For some reason, mostly Im too lazy, I vibecoded all the UI related things
-# Here we name the cog and create a new class for the cog.
 
 class SubmitButton(discord.ui.View):
     def __init__(self, handle, platform, problem) -> None:
@@ -172,45 +172,78 @@ class CP(commands.Cog, name="cp"):
         description = "Save your cp accounts (*Currently only support cf*)"
     )
     async def save(self, context: Context, platform, handle):
-        problem = await self.cp_api.true_random_problem()
-        problem_link = f"https://codeforces.com/contest/{problem['contestId']}/problem/{problem['index']}"
-        user_id = context.author.id
+        problem = await self.cp_api.random_problem()
+        if (platform == "cf"):
+            while problem["platform"] != "cf":
+                problem = await self.cp_api.random_problem()
+            problem_link = f"https://codeforces.com/contest/{problem['contestId']}/problem/{problem['index']}"
+            user_id = context.author.id
 
-        button = SubmitButton(handle, platform, problem)
-        embed = discord.Embed(
-            color = 0xCCCCCC,
-            description=f"Please submit a compilation error to [this problem]({problem_link})\n"
-                        "When you are done, press the button below",
-        )
-        message = await context.send(embed=embed, view=button)
-        await asyncio.sleep(0.1) 
-        
-        try:
-            # Set a timeout of 300 seconds (5 minutes)
-            await asyncio.wait_for(button.wait(), timeout=300)
-        except asyncio.TimeoutError:
+            button = SubmitButton(handle, platform, problem)
             embed = discord.Embed(
-                description="⏰ Verification timed out. Please try again.",
-                color=0xFF0000
+                color = 0xCCCCCC,
+                description=f"Please submit a compilation error to [this problem]({problem_link})\n"
+                            "When you are done, press the button below",
             )
-            await message.edit(embed=embed, view=None)
-            return
-        
-        print(button.result)
-
-        if button.result:
-            await self.bot.database.add_cp_acc_row(user_id,handle,platform)
-            embed = discord.Embed(
-                description="✅ You are now signed in uwu!!",
-                color=0x00FF00
-            )
-            await message.edit(embed=embed, view=None)
-        else:
-            embed = discord.Embed(
-                description=f"❌ Please resubmit the [problem]({problem_link}) :3",
-                color=0xFF0000
-            )
+            message = await context.send(embed=embed, view=button)
+            await asyncio.sleep(0.1) 
+            
+            try:
+                # Set a timeout of 300 seconds (5 minutes)
+                await asyncio.wait_for(button.wait(), timeout=300)
+            except asyncio.TimeoutError:
+                embed = discord.Embed(
+                    description="⏰ Verification timed out. Please try again.",
+                    color=0xFF0000
+                )
+                await message.edit(embed=embed, view=None)
+                return
+            
+            print(button.result)
+            if button.result:
+                await self.bot.database.add_cp_acc_row(user_id,handle,platform)
+                embed = discord.Embed(
+                    description="✅ You are now signed in uwu!!",
+                    color=0x00FF00
+                )
+                await message.edit(embed=embed, view=None)
+            else:
+                embed = discord.Embed(
+                    description=f"❌ Please resubmit the [problem]({problem_link}) :3",
+                    color=0xFF0000
+                )
             await message.edit(embed=embed, view=button)
+
+        elif platform == "at":
+            problem = {
+                "index": "A",
+                "contestId": f"abc{random.randrange(300,400)}"
+            }
+
+            problem_link = f"https://atcoder.jp/contests/{problem['contestId']}/tasks/{problem['contestId']}_{problem['index'].lower()}"
+            problem_id = f"{problem["contestId"]}_{problem["index"].lower()}"
+            embed = discord.Embed(
+                color = 0xCCCCCC,
+                description=f"Please submit a CE to [this problem]({problem_link}) and wait for at most five minutes"
+            )
+            await context.reply(embed = embed)
+            for i in range(10):
+                submissions = await self.cp_api.at_fetch_contest(problem["contestId"])
+                if submissions == None:
+                    continue
+                # print(submissions)
+                for sub in submissions:
+                    pid = sub["task"][0]
+                    if sub["status"] == "CE" and pid == problem["index"]:
+                        await self.bot.database.add_cp_acc_row(context.author.id, handle, platform)
+                        await context.send("✅ You are now signed in uwu!!")
+                        return
+                await asyncio.sleep(30)
+            
+            await context.send("❌ Please login again")
+            
+
+        
 
         
     """
