@@ -404,7 +404,7 @@ class CP(commands.Cog, name="cp"):
 
 
         handle = await self.bot.database.get_cp_handle(context.author.id, "cf")
-        data = await self.cp_api.fetch_user_info(handle)
+        data = await self.cp_api.fetch_user_info(handle, platform="cf")
         user_data = data['result'][0]
 
         handle = user_data.get('handle')
@@ -606,6 +606,78 @@ class CP(commands.Cog, name="cp"):
     """
     Recap stuff
     """
+
+    @cp.command(
+        name = "help",
+        description = "Show all available CP commands"
+    )
+    async def help(self, context: Context):
+        """
+        Display all available CP commands with descriptions
+        """
+        self.bot.logger.info(f"User {context.author.id} requested help command")
+        
+        embed = discord.Embed(
+            title="🔧 CP Bot Commands",
+            description="Here are all available commands for the CP bot",
+            color=0x3498db
+        )
+        
+        # Registration & Setup
+        embed.add_field(
+            name="📝 Registration & Setup",
+            value=(
+                "`/cp set` - Register this channel for daily CP problems\n"
+                "`/cp unset` - Unregister this channel from daily CP problems\n"
+                "`/cp save <platform> <handle>` - Register your CP account (cf or at)\n"
+            ),
+            inline=False
+        )
+        
+        # Problem Commands
+        embed.add_field(
+            name="📚 Problem Commands",
+            value=(
+                "`/cp random` - Get a random weighted CP problem\n"
+                "`/cp truerandom` - Get a completely random CP problem\n"
+                "`/cp daily` - Show today's daily CP challenge\n"
+                "`/cp submit` - Check if you solved today's problem\n"
+            ),
+            inline=False
+        )
+        
+        # User Info
+        embed.add_field(
+            name="👤 User Information",
+            value=(
+                "`/cp cf` - Show your Codeforces profile info and stats\n"
+                "`/cp lb` - Display the local leaderboard\n"
+            ),
+            inline=False
+        )
+        
+        # Owner Commands
+        embed.add_field(
+            name="⚙️ Owner Commands",
+            value=(
+                "`/cp channels` - List all registered channels (Owner only)\n"
+            ),
+            inline=False
+        )
+        
+        embed.add_field(
+            name="📌 Notes",
+            value=(
+                "• **Platforms**: `cf` = Codeforces, `at` = AtCoder\n"
+                "• **Daily Problems**: Automatically posted daily, check with `/cp submit`\n"
+                "• **Streaks**: Your streak resets if you don't solve the daily problem\n"
+            ),
+            inline=False
+        )
+        
+        embed.set_footer(text="Use /cp <command> for more details on any command")
+        
+        await context.reply(embed=embed)
 
     @cp.command(
         name = "test"
