@@ -172,7 +172,6 @@ class CFHandler:
             problem.pop("type")
             problem.pop("tags")
             if "points" in problem:
-                problem["rating"] = problem["points"]
                 problem.pop("points")
             problem["platform"] = "cf"
             data[f"cf_{id}"] = problem

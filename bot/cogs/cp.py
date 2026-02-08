@@ -532,11 +532,16 @@ class CP(commands.Cog, name="cp"):
     @cp.command(
         name = "daily"
     )
-    @commands.is_owner()
     async def set_daily_manually(self, context:Context, problem=None):
         self.bot.logger.info("Daily command triggered manually")
         problem = await self.bot.database.get_daily_problem()
-        today  = int(time.time() // 86400 * 86400)
+        
+        # Check if problem has the expected structure
+        if not problem or len(problem) < 3:
+            await context.reply("❌ No daily problem found or data is incomplete.")
+            return
+
+        today = int(time.time() // 86400 * 86400)
         last_day = int(problem[0])
         if (today - last_day) >= 86400:
             self.bot.logger.info("Generating new daily problem")
@@ -546,8 +551,8 @@ class CP(commands.Cog, name="cp"):
             with open("data/json/problems.json") as f:
                 data = json.loads(f.read())
             problem = data[id]
-            self.bot.logger.info(f"Displaying current daily problem: {problem[1]} ({problem[2]})")
-            await context.reply(embed = self.__embedding_cf(problem)) 
+            self.bot.logger.info(f"Displaying current daily problem: {id}")
+            await context.reply(embed=self.__embedding_cf(problem)) 
 
 
     async def _daily_problem_task(self):
