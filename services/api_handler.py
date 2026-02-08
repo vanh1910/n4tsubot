@@ -392,6 +392,8 @@ class ATCODERAPIHANDLER:
                     href = detail_link['href']
                     submission_id = href.split('/')[-1]
 
+                index = "H" if task[0:2] == "Ex" else task[0]
+
                 submissions.append({
                     'id': submission_id,
                     'time': time_str,
@@ -402,7 +404,8 @@ class ATCODERAPIHANDLER:
                     'code_size': code_size,
                     'status': status,
                     'exec_time': exec_time,
-                    'memory': memory
+                    'memory': memory,
+                    'index' : index
                 })
 
             except IndexError:
@@ -411,8 +414,8 @@ class ATCODERAPIHANDLER:
 
         return submissions
 
-    async def fetch_contest_submissions(self, contestid):
-        referrer = f"https://atcoder.jp/contests/{contestid}/submissions"
+    async def fetch_contest_submissions(self, contestid, problemid):
+        referrer = f"https://atcoder.jp/contests/{contestid}/submissions?.Task={contestid}_{problemid.lower()}"
         url = referrer
         user_agent = os.getenv('USER_AGENT', 'Mozilla/5.0')
         cookie_value = os.getenv('ATCODER_COOKIE', '')
@@ -523,8 +526,8 @@ class CPAPIHANDLER:
         elif platform == "at": 
             return await self.atcoder_api.fetch_user_submissions(handle)
 
-    async def at_fetch_contest(self, contestid):
-        return await self.atcoder_api.fetch_contest_submissions(contestid)
+    async def at_fetch_contest(self, contestid, problemid):
+        return await self.atcoder_api.fetch_contest_submissions(contestid, problemid)
 
     async def fetch_user_info(self, handle, platform):
         if platform == "cf":

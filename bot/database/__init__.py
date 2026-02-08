@@ -268,15 +268,26 @@ class DatabaseManager:
         await self.connection.commit()
 
     async def get_cp_handle(
-            self, user_id
+            self, user_id, platform=None
     ):
         accs = await self.connection.execute(
             "SELECT * FROM cp_acc WHERE user_id = ?", (user_id,)  ,
         )
         accs = await accs.fetchall()
-        accs = [acc[1] for acc in accs]
         await self.connection.commit()
-        return accs[0]
+        
+        if not accs:
+            return None
+        
+        # If platform is specified, return handle for that platform
+        if platform:
+            for acc in accs:
+                if acc[2] == platform:  # acc[2] is platform
+                    return acc[1]  # Return handle
+            return None
+        
+        # Otherwise return handle and platform of first account
+        return {"handle": accs[0][1], "platform": accs[0][2]}
         
 
 

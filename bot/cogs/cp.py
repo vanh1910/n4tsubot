@@ -29,7 +29,7 @@ class SubmitButton(discord.ui.View):
         await interaction.response.defer()
         
         try:
-            subs = await self.cp_api.fetch_user_submission(self.handle)
+            subs = await self.cp_api.fetch_user_submission(self.handle, "cf")
             for sub in subs["result"]:
                 problem_id = f"{sub['problem']['contestId']}{sub['problem']['index']}"
                 expected_id = f"{self.problem['contestId']}{self.problem['index']}"
@@ -73,6 +73,10 @@ class CP(commands.Cog, name="cp"):
         self.update_problems.start()
         self.daily_problem.start()
         self.daily_recap.start()
+        self.auto_check_submissions.start()
+        self.auto_check_atcoder_submissions.start()
+        self.checked_users = set()  # Track CF users who have already been notified today
+        self.checked_atcoder_users = set()  # Track AtCoder users who have already been notified today
 
     @commands.hybrid_group(
             name="cp", 
@@ -145,6 +149,7 @@ class CP(commands.Cog, name="cp"):
                 return
                 
         await self.bot.database.add_cp_channel_row(channel_id)
+        self.bot.logger.info(f"Channel {channel_id} registered for daily CP problems")
         await context.reply("Registering channel completely")
 
     @cp.command(
@@ -161,6 +166,7 @@ class CP(commands.Cog, name="cp"):
                 return
                 
         await self.bot.database.remove_cp_channel_row(channel_id)
+        self.bot.logger.info(f"Channel {channel_id} unregistered from daily CP problems")
         await context.reply("Unset channel completely")
 
 
@@ -172,47 +178,60 @@ class CP(commands.Cog, name="cp"):
         description = "Save your cp accounts (*Currently only support cf*)"
     )
     async def save(self, context: Context, platform, handle):
+        self.bot.logger.info(f"User {context.author.id} attempting to register {platform} handle: {handle}")
         problem = await self.cp_api.random_problem()
         if (platform == "cf"):
             while problem["platform"] != "cf":
                 problem = await self.cp_api.random_problem()
             problem_link = f"https://codeforces.com/contest/{problem['contestId']}/problem/{problem['index']}"
             user_id = context.author.id
+            expected_problem_id = f"{problem['contestId']}{problem['index']}"
+            self.bot.logger.info(f"Verification problem for CF: {expected_problem_id}")
 
-            button = SubmitButton(handle, platform, problem)
             embed = discord.Embed(
-                color = 0xCCCCCC,
+                color=0xCCCCCC,
                 description=f"Please submit a compilation error to [this problem]({problem_link})\n"
-                            "When you are done, press the button below",
+                            "Checking your submissions for 5 minutes...",
             )
-            message = await context.send(embed=embed, view=button)
-            await asyncio.sleep(0.1) 
+            message = await context.send(embed=embed)
             
-            try:
-                # Set a timeout of 300 seconds (5 minutes)
-                await asyncio.wait_for(button.wait(), timeout=300)
-            except asyncio.TimeoutError:
-                embed = discord.Embed(
-                    description="⏰ Verification timed out. Please try again.",
-                    color=0xFF0000
-                )
-                await message.edit(embed=embed, view=None)
-                return
+            # Check submissions 10 times every 30 seconds
+            for i in range(10):
+                try:
+                    subs = await self.cp_api.fetch_user_submission(handle, "cf")
+                    if subs and "result" in subs:
+                        for sub in subs["result"]:
+                            problem_id = f"{sub['problem']['contestId']}{sub['problem']['index']}"
+                            if problem_id == expected_problem_id and sub["verdict"] == "COMPILATION_ERROR":
+                                await self.bot.database.add_cp_acc_row(user_id, handle, platform)
+                                
+                                # Initialize user streak if not already created
+                                today = int(time.time() // 86400 * 86400)
+                                user_streak_data = await self.bot.database.get_user_cp_streak(user_id)
+                                if not user_streak_data:
+                                    await self.bot.database.new_user_streak(user_id, context.channel.id, 0, 0)
+                                
+                                self.bot.logger.info(f"✅ User {user_id} successfully registered CF handle: {handle}")
+                                embed = discord.Embed(
+                                    description="✅ You are now signed in uwu!!",
+                                    color=0x00FF00
+                                )
+                                await message.edit(embed=embed)
+                                return
+                except Exception as e:
+                    self.bot.logger.error(f"Error checking CF submissions for {handle}: {e}")
+                
+                # Wait 30 seconds before next check (except on last iteration)
+                if i < 9:
+                    await asyncio.sleep(30)
             
-            print(button.result)
-            if button.result:
-                await self.bot.database.add_cp_acc_row(user_id,handle,platform)
-                embed = discord.Embed(
-                    description="✅ You are now signed in uwu!!",
-                    color=0x00FF00
-                )
-                await message.edit(embed=embed, view=None)
-            else:
-                embed = discord.Embed(
-                    description=f"❌ Please resubmit the [problem]({problem_link}) :3",
-                    color=0xFF0000
-                )
-            await message.edit(embed=embed, view=button)
+            # If we get here, verification failed
+            self.bot.logger.warning(f"CF verification failed for user {user_id} (handle: {handle})")
+            embed = discord.Embed(
+                description=f"❌ Verification failed. Please try again",
+                color=0xFF0000
+            )
+            await message.edit(embed=embed)
 
         elif platform == "at":
             problem = {
@@ -222,24 +241,34 @@ class CP(commands.Cog, name="cp"):
 
             problem_link = f"https://atcoder.jp/contests/{problem['contestId']}/tasks/{problem['contestId']}_{problem['index'].lower()}"
             problem_id = f"{problem["contestId"]}_{problem["index"].lower()}"
+            self.bot.logger.info(f"Verification problem for AT: {problem_id}")
             embed = discord.Embed(
                 color = 0xCCCCCC,
                 description=f"Please submit a CE to [this problem]({problem_link}) and wait for at most five minutes"
             )
             await context.reply(embed = embed)
             for i in range(10):
-                submissions = await self.cp_api.at_fetch_contest(problem["contestId"])
+                submissions = await self.cp_api.at_fetch_contest(problem["contestId"],problemid = problem.get("index"))
                 if submissions == None:
                     continue
                 # print(submissions)
                 for sub in submissions:
-                    pid = sub["task"][0]
+                    pid = sub["index"]
                     if sub["status"] == "CE" and pid == problem["index"]:
                         await self.bot.database.add_cp_acc_row(context.author.id, handle, platform)
+                        
+                        # Initialize user streak if not already created
+                        today = int(time.time() // 86400 * 86400)
+                        user_streak_data = await self.bot.database.get_user_cp_streak(context.author.id)
+                        if not user_streak_data:
+                            await self.bot.database.new_user_streak(context.author.id, context.channel.id, 0, 0)
+                        
+                        self.bot.logger.info(f"✅ User {context.author.id} successfully registered AT handle: {handle}")
                         await context.send("✅ You are now signed in uwu!!")
                         return
                 await asyncio.sleep(30)
             
+            self.bot.logger.warning(f"AT verification failed for user {context.author.id} (handle: {handle})")
             await context.send("❌ Please login again")
             
 
@@ -374,7 +403,7 @@ class CP(commands.Cog, name="cp"):
 
 
 
-        handle = await self.bot.database.get_cp_handle(context.author.id)
+        handle = await self.bot.database.get_cp_handle(context.author.id, "cf")
         data = await self.cp_api.fetch_user_info(handle)
         user_data = data['result'][0]
 
@@ -434,6 +463,12 @@ class CP(commands.Cog, name="cp"):
         await context.send(embed=embed)
 
 
+    """
+        Auto submit
+    """
+
+    
+
 
     """
         Daily problem stuff
@@ -444,7 +479,8 @@ class CP(commands.Cog, name="cp"):
         description = "submit daily problem" 
     )
     async def submit(self, context: Context):
-        handle = await self.bot.database.get_cp_handle(context.author.id)
+        self.bot.logger.info(f"User {context.author.id} checking submission for daily problem")
+        handle = await self.bot.database.get_cp_handle(context.author.id, "cf")
         subs = await self.cp_api.fetch_user_submission(handle)
         problem_id = await self.bot.database.get_daily_problem()
         problem_id = problem_id[1]
@@ -459,6 +495,7 @@ class CP(commands.Cog, name="cp"):
                 user_streak_data = await self.bot.database.get_user_cp_streak(user_id)
                 if not user_streak_data:
                     await self.bot.database.new_user_streak(user_id, context.channel.id,1,today)
+                    self.bot.logger.info(f"Manual submit: User {handle} completed {problem_id} (new user)")
                     return
                 last_submit_date = user_streak_data[1]
                 streak = user_streak_data[0]
@@ -469,10 +506,12 @@ class CP(commands.Cog, name="cp"):
   
                 if today - last_submit_date  > 86400:
                     await self.bot.database.update_user_streak(user_id, today, 1, solved_problems + 1)
+                    self.bot.logger.info(f"Manual submit: User {handle} completed {problem_id} (streak reset to 1)")
                 elif today == last_submit_date:
                     return
                 else:
                     await self.bot.database.update_user_streak(user_id, today, streak + 1, solved_problems + 1)
+                    self.bot.logger.info(f"Manual submit: User {handle} completed {problem_id} (streak: {streak + 1})")
                     
                 return
             
@@ -481,6 +520,10 @@ class CP(commands.Cog, name="cp"):
 
 
     def __convert_id (self, id :str, platform: str):
+        # For AtCoder problems (e.g., "abc315_b"), the format is already correct
+        if platform == "at":
+            return f"{platform}_{id}"
+        # For Codeforces problems (e.g., "1175B"), split at first letter
         for i in range (len(id)):
             if id[i].isalpha():
                 return f"{platform}_{id[0:i]}_{id[i::].lower()}"
@@ -491,25 +534,30 @@ class CP(commands.Cog, name="cp"):
     )
     @commands.is_owner()
     async def set_daily_manually(self, context:Context, problem=None):
+        self.bot.logger.info("Daily command triggered manually")
         problem = await self.bot.database.get_daily_problem()
         today  = int(time.time() // 86400 * 86400)
         last_day = int(problem[0])
         if (today - last_day) >= 86400:
+            self.bot.logger.info("Generating new daily problem")
             await self._daily_problem_task()
         else:
             id = self.__convert_id(problem[1], problem[2])
             with open("data/json/problems.json") as f:
                 data = json.loads(f.read())
             problem = data[id]
+            self.bot.logger.info(f"Displaying current daily problem: {problem[1]} ({problem[2]})")
             await context.reply(embed = self.__embedding_cf(problem)) 
 
 
     async def _daily_problem_task(self):
+        self.bot.logger.info("Starting daily problem task")
         problem = await self.cp_api.random_problem()
         channels_id = await self.bot.database.get_all_cp_channel()
         today = int(time.time() // 86400 * 86400)
         problem_id = f"{problem['contestId']}{problem['index']}"
         await self.bot.database.add_daily_problem(today,problem_id,problem["platform"])
+        self.bot.logger.info(f"Daily problem set: {problem_id} ({problem['platform']}) - sending to {len(channels_id)} channels")
 
 
         for channel_id in channels_id:
@@ -541,6 +589,7 @@ class CP(commands.Cog, name="cp"):
     async def update_problems(self):
         if datetime.datetime.now().weekday() != 0:
             return
+        self.bot.logger.info("Starting weekly problems update")
         self.cp_api.build_dynamic_weight_map()
         await self.cp_api.update_data()
     
@@ -562,6 +611,7 @@ class CP(commands.Cog, name="cp"):
 
     @tasks.loop(time=daily_recap_time)
     async def daily_recap(self):
+        self.bot.logger.info("Starting daily recap task")
         channels_id = await self.bot.database.get_all_cp_channel()
         today = int(time.time() // 86400 * 86400)
 
@@ -585,7 +635,7 @@ class CP(commands.Cog, name="cp"):
                         completing_user.append(user)
                 
                 if len(completing_user) == 0:
-                    await channel.send("Bro, the daily problem just mogged the whole server. Y'all actually have 0 aura today. Straight up NPC behavior🥀")
+                    await channel.send("No one completed today problems 🥺🥺🥺")
                     continue
 
                 lines = ["🎉 **DAILY CHALLENGE RESULTS** 🎉"]
@@ -599,6 +649,250 @@ class CP(commands.Cog, name="cp"):
 
     @daily_recap.before_loop
     async def before_daily_recap(self) -> None:
+        await self.bot.wait_until_ready()
+
+    """
+    Auto-check submissions
+    """
+
+    @tasks.loop(minutes=2)
+    async def auto_check_submissions(self):
+        """
+        Automatically check if users have completed today's problem and notify the channel
+        """
+        try:
+            self.bot.logger.info("Starting auto-check for Codeforces submissions")
+            channels_id = await self.bot.database.get_all_cp_channel()
+            today = int(time.time() // 86400 * 86400)
+            
+            # Reset checked users at the start of a new day
+            if not hasattr(self, 'last_check_date') or self.last_check_date != today:
+                self.checked_users = set()
+                self.last_check_date = today
+                self.bot.logger.info("Reset checked users for new day")
+            
+            problem_data = await self.bot.database.get_daily_problem()
+            if not problem_data:
+                self.bot.logger.warning("No daily problem found")
+                return
+            
+            # Only check CF problems
+            if problem_data[2] != "cf":
+                return
+            
+            problem_id = problem_data[1]
+            self.bot.logger.info(f"Checking CF problem: {problem_id}")
+            
+            for channel_id in channels_id:
+                try:
+                    # Try to get the channel from cache first
+                    channel = self.bot.get_channel(int(channel_id))
+                    
+                    if not channel:
+                        # Try to fetch the channel if not in cache
+                        try:
+                            channel = await self.bot.fetch_channel(int(channel_id))
+                        except Exception as e:
+                            self.bot.logger.error(f"Failed to fetch channel {channel_id}: {e}")
+                            continue
+                    
+                    # Get all users registered on this channel
+                    users = await self.bot.database.get_all_users_cp_streak(channel_id)
+                    
+                    if len(users) == 0:
+                        continue
+                    
+                    for user_data in users:
+                        user_id = user_data[0]
+                        
+                        # Skip if we already notified this user today
+                        if user_id in self.checked_users:
+                            continue
+                        
+                        try:
+                            # Get user's CP handle
+                            handle = await self.bot.database.get_cp_handle(user_id, "cf")
+                            if not handle:
+                                continue
+                            
+                            # Fetch user's submissions
+                            subs = await self.cp_api.fetch_user_submission(handle, "cf")
+                            
+                            if not subs or "result" not in subs:
+                                continue
+                            
+                            # Check if user completed today's problem
+                            for sub in subs["result"]:
+                                sub_problem_id = f"{sub['problem']['contestId']}{sub['problem']['index']}"
+                                verdict = sub["verdict"]
+                                
+                                if sub_problem_id == problem_id and verdict == "OK":
+                                    # Mark user as checked
+                                    self.checked_users.add(user_id)
+                                    
+                                    # Send notification to channel
+                                    user_mention = f"<@{user_id}>"
+                                    embed = discord.Embed(
+                                        title="✅ Daily Challenge Completed!",
+                                        description=f"{user_mention} has completed today's problem! Keep it up!",
+                                        color=0x00FF00
+                                    )
+                                    
+                                    # Update user streak
+                                    user_streak_data = await self.bot.database.get_user_cp_streak(user_id)
+                                    if user_streak_data:
+                                        last_submit_date = user_streak_data[1]
+                                        streak = user_streak_data[0]
+                                        solved_problems = user_streak_data[2]
+                                        
+                                        if today - last_submit_date > 86400:
+                                            # Streak broken, reset to 1
+                                            await self.bot.database.update_user_streak(user_id, today, 1, solved_problems + 1)
+                                            self.bot.logger.info(f"CF: User {handle} completed {problem_id} (streak reset to 1)")
+                                        elif today == last_submit_date:
+                                            # Already counted today
+                                            pass
+                                        else:
+                                            # Continue streak
+                                            new_streak = streak + 1
+                                            await self.bot.database.update_user_streak(user_id, today, new_streak, solved_problems + 1)
+                                            self.bot.logger.info(f"CF: User {handle} completed {problem_id} (streak: {new_streak})")
+                                    
+                                    await channel.send(embed=embed)
+                                    break
+                        except Exception as e:
+                            self.bot.logger.error(f"Error checking submissions for user {user_id}: {e}", exc_info=True)
+                            continue
+                            
+                except Exception as e:
+                    self.bot.logger.error(f"Error in auto_check_submissions for channel {channel_id}: {e}", exc_info=True)
+                    continue
+        except Exception as e:
+            self.bot.logger.exception(f"Error in auto_check_submissions: {e}")
+
+    @auto_check_submissions.before_loop
+    async def before_auto_check_submissions(self) -> None:
+        await self.bot.wait_until_ready()
+
+    """Auto-check AtCoder submissions"""
+    
+    @tasks.loop(minutes=2)
+    async def auto_check_atcoder_submissions(self):
+        """
+        Automatically check if users have completed today's problem on AtCoder and notify the channel
+        """
+        try:
+            self.bot.logger.info("Starting auto-check for AtCoder submissions")
+            channels_id = await self.bot.database.get_all_cp_channel()
+            today = int(time.time() // 86400 * 86400)
+            
+            # Reset checked users at the start of a new day
+            if not hasattr(self, 'last_check_date_atcoder') or self.last_check_date_atcoder != today:
+                self.checked_atcoder_users = set()
+                self.last_check_date_atcoder = today
+                self.bot.logger.info("Reset checked AtCoder users for new day")
+            
+            problem_data = await self.bot.database.get_daily_problem()
+            if not problem_data:
+                return
+            
+            # Only process AtCoder problems
+            if problem_data[2] != "at":
+                return
+            
+            problem_id = problem_data[1]
+            # Parse problem_id (format: "abc300_a")
+            parts = problem_id.rsplit('_', 1)
+            if len(parts) != 2:
+                return
+            
+            contest_id, problem_index = parts
+            self.bot.logger.info(f"Checking AT problem: {problem_id}")
+            
+            # Fetch contest submissions for this problem
+            try:
+                submissions = await self.cp_api.at_fetch_contest(contest_id, problem_index)
+            except Exception as e:
+                self.bot.logger.error(f"Error fetching AtCoder contest {contest_id}: {e}")
+                return
+            
+            if not submissions:
+                return
+            
+            for channel_id in channels_id:
+                try:
+                    channel = self.bot.get_channel(int(channel_id))
+                    if not channel:
+                        continue
+                    
+                    # Get all users registered on this channel
+                    users = await self.bot.database.get_all_users_cp_streak(channel_id)
+                    
+                    for user_data in users:
+                        user_id = user_data[0]
+                        
+                        # Skip if we already notified this user today
+                        if user_id in self.checked_atcoder_users:
+                            continue
+                        
+                        try:
+                            # Get user's AtCoder handle
+                            handle = await self.bot.database.get_cp_handle(user_id, "at")
+                            if not handle:
+                                continue
+                            
+                            # Check if user has an AC submission for this problem
+                            found_ac = False
+                            for sub in submissions:
+                                if sub.get('user') == handle and sub.get('status') == "AC":
+                                    found_ac = True
+                                    break
+                            
+                            if found_ac:
+                                # Mark user as checked
+                                self.checked_atcoder_users.add(user_id)
+                                
+                                # Send notification to channel
+                                user_mention = f"<@{user_id}>"
+                                embed = discord.Embed(
+                                    title="✅ AtCoder Daily Challenge Completed!",
+                                    description=f"{user_mention} has completed today's AtCoder problem! Sugoi!",
+                                    color=0x00FF00
+                                )
+                                
+                                # Update user streak
+                                user_streak_data = await self.bot.database.get_user_cp_streak(user_id)
+                                if user_streak_data:
+                                    last_submit_date = user_streak_data[1]
+                                    streak = user_streak_data[0]
+                                    solved_problems = user_streak_data[2]
+                                    
+                                    if today - last_submit_date > 86400:
+                                        # Streak broken, reset to 1
+                                        await self.bot.database.update_user_streak(user_id, today, 1, solved_problems + 1)
+                                        self.bot.logger.info(f"AT: User {handle} completed {problem_id} (streak reset to 1)")
+                                    elif today == last_submit_date:
+                                        # Already counted today
+                                        pass
+                                    else:
+                                        # Continue streak
+                                        new_streak = streak + 1
+                                        await self.bot.database.update_user_streak(user_id, today, new_streak, solved_problems + 1)
+                                        self.bot.logger.info(f"AT: User {handle} completed {problem_id} (streak: {new_streak})")
+                                
+                                await channel.send(embed=embed)
+                        except Exception as e:
+                            self.bot.logger.error(f"Error checking AtCoder submissions for user {user_id}: {e}")
+                            continue
+                            
+                except Exception as e:
+                    self.bot.logger.error(f"Error in auto_check_atcoder_submissions for channel {channel_id}: {e}")
+                    continue
+        except Exception as e:
+            self.bot.logger.exception(f"Error in auto_check_atcoder_submissions: {e}")
+
+    @auto_check_atcoder_submissions.before_loop
+    async def before_auto_check_atcoder_submissions(self) -> None:
         await self.bot.wait_until_ready()
 
 async def setup(bot) -> None:
