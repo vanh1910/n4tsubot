@@ -301,12 +301,12 @@ class DatabaseManager:
         problems = await problems.fetchone()
         return problems
 
-    async def new_user_streak(self, user_id, channel_id, streak=0, last_submit=0 ):
+    async def new_user_streak(self, user_id, channel_id, streak=0, last_submit=0):
         await self.connection.execute(
             "INSERT INTO user_cp_streak (" \
             "user_id, channel_id, streak, last_submit, solved_problems)" \
             "VALUES(?,?,?,?,?)",
-            (user_id, channel_id, streak, last_submit, 1) \
+            (user_id, channel_id, streak, last_submit, 0) \
         )
         await self.connection.commit()
     
