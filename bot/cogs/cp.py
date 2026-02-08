@@ -595,7 +595,10 @@ class CP(commands.Cog, name="cp"):
         if datetime.datetime.now().weekday() != 0:
             return
         self.bot.logger.info("Starting weekly problems update")
-        self.cp_api.build_dynamic_weight_map()
+        if datetime.datetime.now().weekday() == 5:
+            self.cp_api.build_dynamic_weight_map(0.41, 1800)
+        else:
+            self.cp_api.build_dynamic_weight_map(0.36, 1500)
         await self.cp_api.update_data()
     
     @update_problems.before_loop
