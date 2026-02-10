@@ -740,6 +740,17 @@ class CP(commands.Cog, name="cp"):
         """
         Automatically check if users have completed today's problem and notify the channel
         """
+        # Skip checking between 23:45 and 0:15 UTC
+        now = datetime.datetime.now(datetime.timezone.utc)
+        current_time = now.time()
+        start_time = datetime.time(23, 45, 0)
+        end_time = datetime.time(0, 15, 0)
+        
+        # Handle the case where the window spans midnight
+        if current_time >= start_time or current_time < end_time:
+            self.bot.logger.info("Skipping auto-check during maintenance window (23:45-0:15 UTC)")
+            return
+        
         try:
             self.bot.logger.info("Starting auto-check for Codeforces submissions")
             channels_id = await self.bot.database.get_all_cp_channel()
@@ -861,6 +872,17 @@ class CP(commands.Cog, name="cp"):
         """
         Automatically check if users have completed today's problem on AtCoder and notify the channel
         """
+        # Skip checking between 23:45 and 0:15 UTC
+        now = datetime.datetime.now(datetime.timezone.utc)
+        current_time = now.time()
+        start_time = datetime.time(23, 45, 0)
+        end_time = datetime.time(0, 15, 0)
+        
+        # Handle the case where the window spans midnight
+        if current_time >= start_time or current_time < end_time:
+            self.bot.logger.info("Skipping AtCoder auto-check during maintenance window (23:45-0:15 UTC)")
+            return
+        
         try:
             self.bot.logger.info("Starting auto-check for AtCoder submissions")
             channels_id = await self.bot.database.get_all_cp_channel()
