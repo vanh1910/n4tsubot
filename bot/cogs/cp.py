@@ -896,20 +896,22 @@ class CP(commands.Cog, name="cp"):
             
             problem_data = await self.bot.database.get_daily_problem()
             if not problem_data:
+                self.bot.logger.warning("No daily problem found for AtCoder auto-check")
                 return
+            
+            self.bot.logger.debug(f"Problem data retrieved: {problem_data}")
             
             # Only process AtCoder problems
             if problem_data[2] != "at":
+                self.bot.logger.debug(f"Daily problem is not AtCoder (platform: {problem_data[2]}), skipping")
                 return
             
             problem_id = problem_data[1]
             # Parse problem_id (format: "abc300_a")
-            parts = problem_id.rsplit('_', 1)
-            if len(parts) != 2:
-                return
             
-            contest_id, problem_index = parts
-            self.bot.logger.info(f"Checking AT problem: {problem_id}")
+            
+            contest_id, problem_index = problem_id[0:-1], problem_id[-1]
+            self.bot.logger.info(f"Checking AT problem: {problem_id} (contest: {contest_id}, index: {problem_index})")
             
             # Fetch contest submissions for this problem
             try:
@@ -919,36 +921,52 @@ class CP(commands.Cog, name="cp"):
                 return
             
             if not submissions:
+                self.bot.logger.warning(f"No submissions found for AtCoder contest {contest_id}, problem {problem_index}")
                 return
+            
+            self.bot.logger.info(f"Found {len(submissions)} submissions for contest {contest_id}, problem {problem_index}")
             
             for channel_id in channels_id:
                 try:
                     channel = self.bot.get_channel(int(channel_id))
                     if not channel:
+                        self.bot.logger.debug(f"Channel {channel_id} not found in cache")
                         continue
+                    
+                    self.bot.logger.debug(f"Processing channel {channel_id} ({channel.name if hasattr(channel, 'name') else 'DM'})")
                     
                     # Get all users registered on this channel
                     users = await self.bot.database.get_all_users_cp_streak(channel_id)
+                    self.bot.logger.debug(f"Found {len(users)} users on channel {channel_id}")
                     
                     for user_data in users:
                         user_id = user_data[0]
                         
                         # Skip if we already notified this user today
                         if user_id in self.checked_atcoder_users:
+                            self.bot.logger.debug(f"User {user_id} already checked today, skipping")
                             continue
                         
                         try:
                             # Get user's AtCoder handle
                             handle = await self.bot.database.get_cp_handle(user_id, "at")
                             if not handle:
+                                self.bot.logger.debug(f"User {user_id} has no AtCoder handle registered")
                                 continue
+                            
+                            self.bot.logger.debug(f"Checking submissions for user {user_id} (handle: {handle})")
                             
                             # Check if user has an AC submission for this problem
                             found_ac = False
                             for sub in submissions:
                                 if sub.get('user') == handle and sub.get('status') == "AC":
                                     found_ac = True
+                                    self.bot.logger.info(f"Found AC submission for user {handle} on problem {problem_id}")
                                     break
+                            
+                            if not found_ac:
+                                self.bot.logger.debug(f"No AC submission found for user {handle} on problem {problem_id}")
+                                continue
                             
                             if found_ac:
                                 # Mark user as checked
@@ -964,10 +982,14 @@ class CP(commands.Cog, name="cp"):
                                 
                                 # Update user streak
                                 user_streak_data = await self.bot.database.get_user_cp_streak(user_id)
+                                self.bot.logger.debug(f"Current streak data for user {user_id}: {user_streak_data}")
+                                
                                 if user_streak_data:
                                     last_submit_date = user_streak_data[1]
                                     streak = user_streak_data[0]
                                     solved_problems = user_streak_data[2]
+                                    
+                                    self.bot.logger.debug(f"User {handle} streak details - current: {streak}, solved: {solved_problems}, last_submit: {last_submit_date}, today: {today}")
                                     
                                     if today - last_submit_date > 172800:
                                         # Streak broken, reset to 1
@@ -975,6 +997,7 @@ class CP(commands.Cog, name="cp"):
                                         self.bot.logger.info(f"AT: User {handle} completed {problem_id} (streak reset to 1)")
                                     elif today == last_submit_date:
                                         # Already counted today
+                                        self.bot.logger.debug(f"AT: User {handle} already submitted today for {problem_id}")
                                         pass
                                     else:
                                         # Continue streak
@@ -983,6 +1006,7 @@ class CP(commands.Cog, name="cp"):
                                         self.bot.logger.info(f"AT: User {handle} completed {problem_id} (streak: {new_streak})")
                                 
                                 await channel.send(embed=embed)
+                                self.bot.logger.info(f"Sent notification to channel {channel_id} for user {handle} completing {problem_id}")
                         except Exception as e:
                             self.bot.logger.error(f"Error checking AtCoder submissions for user {user_id}: {e}")
                             continue
