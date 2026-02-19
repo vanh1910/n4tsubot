@@ -140,7 +140,7 @@ class CFHandler:
                 ) as resp:
                     resp.raise_for_status()
                     data = await resp.json()
-                    with open(f"data/json/cf_tagged_problems_{tag}.json", "w", encoding="utf-8") as f:
+                    with open(f"data/cache/cf/tagged_problems_{tag}.json", "w", encoding="utf-8") as f:
                         json.dump(data, f, ensure_ascii=False, indent=2)
                     return data
 
@@ -178,7 +178,7 @@ class CFHandler:
             problem["platform"] = "cf"
             data[f"cf_{id}"] = problem
 
-        with open("data/json/cf_all_problems_cache.json", "w", encoding="utf-8") as f:
+        with open("data/cache/cf/all_problems.json", "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return data
         
@@ -222,7 +222,7 @@ class CFHandler:
                 ) as resp:
                     resp.raise_for_status()
                     data = await resp.json()
-                    with open(f"data/json/cf_user_submissions_{handle}.json", "w", encoding="utf-8") as f:
+                    with open(f"data/cache/cf/user_submissions_{handle}.json", "w", encoding="utf-8") as f:
                         json.dump(data, f, ensure_ascii=False, indent=2)
                     return data
                
@@ -245,7 +245,7 @@ class CFHandler:
                 ) as resp:
                     resp.raise_for_status()
                     data = await resp.json()
-                    with open(f"data/json/cf_user_info_{handle}.json", "w", encoding="utf-8") as f:
+                    with open(f"data/cache/cf/user_info_{handle}.json", "w", encoding="utf-8") as f:
                         json.dump(data, f, ensure_ascii=False, indent=2)
                     return data
         except aiohttp.ClientError as e:
@@ -305,9 +305,10 @@ class ATCODERAPIHANDLER:
                 }
             except:
                 continue
-            with open("data/json/atcoder_all_problems_cache.json", "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)        
-                return data
+        
+        with open("data/cache/atcoder/all_problems.json", "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return data
 
 
     async def true_random(self):
@@ -329,7 +330,7 @@ class ATCODERAPIHANDLER:
                 ) as resp:
                     resp.raise_for_status()
                     data = await resp.json()
-                    with open(f"data/json/atcoder_user_submissions_{handle}.json", "w", encoding="utf-8") as f:
+                    with open(f"data/cache/atcoder/user_submissions_{handle}.json", "w", encoding="utf-8") as f:
                         json.dump(data, f, ensure_ascii=False, indent=2)
                     return data
         except aiohttp.ClientError as e:
@@ -455,7 +456,7 @@ class ATCODERAPIHANDLER:
                 # print(f"Body length: {len(html)}")
                 # print(html)
                 submissions = self.__parse_atcoder_submissions(html)
-                with open(f"data/json/atcoder_contest_submissions_{contestid}_{problemid}.json", "w", encoding="utf-8") as f:
+                with open(f"data/cache/atcoder/contest_submissions_{contestid}_{problemid}.json", "w", encoding="utf-8") as f:
                     json.dump(submissions, f, ensure_ascii=False, indent=2)
                 return submissions
                 # print(html) # Uncomment to see the full content
@@ -531,7 +532,7 @@ class CPAPIHANDLER:
         data = await self.cf_api.fetch_all_problems() | await self.atcoder_api.fetch_all_problems()
         with open("data/json/problems.json", "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
-        with open("data/json/problems_cache.json", "w", encoding="utf-8") as f:
+        with open("data/cache/merged/all_problems.json", "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
         logger.info("Updated competitive programming problems cache")
 
