@@ -504,7 +504,7 @@ class CP(commands.Cog, name="cp"):
                 
 
   
-                if today - last_submit_date  > 86400:
+                if today - last_submit_date  > 172800:
                     await self.bot.database.update_user_streak(user_id, today, 1, solved_problems + 1)
                     self.bot.logger.info(f"Manual submit: User {handle} completed {problem_id} (streak reset to 1)")
                 elif today == last_submit_date:
@@ -709,7 +709,7 @@ class CP(commands.Cog, name="cp"):
                 users = await self.bot.database.get_all_users_cp_streak(channel_id)
                 self.bot.logger.info(users)
                 for user in users:
-                    if int(user[3]) != today:
+                    if today - int(user[3]) > 172800:
                         await self.bot.database.reset_streak(user[0])
                     else:
                         completing_user.append(user)
@@ -836,7 +836,7 @@ class CP(commands.Cog, name="cp"):
                                         streak = user_streak_data[0]
                                         solved_problems = user_streak_data[2]
                                         
-                                        if today - last_submit_date > 86400:
+                                        if today - last_submit_date > 172800:
                                             # Streak broken, reset to 1
                                             await self.bot.database.update_user_streak(user_id, today, 1, solved_problems + 1)
                                             self.bot.logger.info(f"CF: User {handle} completed {problem_id} (streak reset to 1)")
@@ -969,7 +969,7 @@ class CP(commands.Cog, name="cp"):
                                     streak = user_streak_data[0]
                                     solved_problems = user_streak_data[2]
                                     
-                                    if today - last_submit_date > 86400:
+                                    if today - last_submit_date > 172800:
                                         # Streak broken, reset to 1
                                         await self.bot.database.update_user_streak(user_id, today, 1, solved_problems + 1)
                                         self.bot.logger.info(f"AT: User {handle} completed {problem_id} (streak reset to 1)")
