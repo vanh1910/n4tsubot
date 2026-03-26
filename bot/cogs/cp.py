@@ -9,6 +9,7 @@ import os
 import json
 
 owner_id = os.getenv('OWNER_ID')
+repeat_time = 86400 * 7
 
 # For some reason, mostly Im too lazy, I vibecoded all the UI related things
 
@@ -60,7 +61,7 @@ class CP(commands.Cog, name="cp"):
     # compute recap time safely (combine with a date, subtract timedelta, take .time())
     daily_recap_time = (
         datetime.datetime.combine(datetime.date.today(), daily_problem_time)
-        - datetime.timedelta(hours=0,minutes=20)
+        - datetime.timedelta(hours=0,minutes=9)
     ).time()
     """
     init stuff
@@ -137,11 +138,11 @@ class CP(commands.Cog, name="cp"):
 
     @cp.command(
         name = "set",
-        description = "set channel for daily cp problems, or register dm for daily cp problems"
+        description = "set channel for weekly cp problems, or register dm for weekly cp problems"
     )
     async def set(self, context:Context) -> None:
         """
-            Add server channel, or dm for daily problems
+            Add server channel, or dm for weekly problems
         """
         channel_id = context.channel.id
         if context.guild:
@@ -149,16 +150,16 @@ class CP(commands.Cog, name="cp"):
                 return
                 
         await self.bot.database.add_cp_channel_row(channel_id)
-        self.bot.logger.info(f"Channel {channel_id} registered for daily CP problems")
+        self.bot.logger.info(f"Channel {channel_id} registered for weekly CP problems")
         await context.reply("Registering channel completely")
 
     @cp.command(
         name = "unset",
-        description = "unset channel for daily cp problems"
+        description = "unset channel for weekly cp problems"
     )
     async def unset(self, context:Context) -> None:
         """
-            Add server channel, or dm for daily problems
+            Add server channel, or dm for weekly problems
         """
         channel_id = context.channel.id
         if context.guild:
@@ -166,7 +167,7 @@ class CP(commands.Cog, name="cp"):
                 return
                 
         await self.bot.database.remove_cp_channel_row(channel_id)
-        self.bot.logger.info(f"Channel {channel_id} unregistered from daily CP problems")
+        self.bot.logger.info(f"Channel {channel_id} unregistered from weekly CP problems")
         await context.reply("Unset channel completely")
 
 
@@ -471,15 +472,15 @@ class CP(commands.Cog, name="cp"):
 
 
     """
-        Daily problem stuff
+        Weekly problem stuff
     """
 
     @cp.command(
         name = "submit",
-        description = "submit daily problem" 
+        description = "submit weekly problem" 
     )
     async def submit(self, context: Context):
-        self.bot.logger.info(f"User {context.author.id} checking submission for daily problem")
+        self.bot.logger.info(f"User {context.author.id} checking submission for weekly problem")
         handle = await self.bot.database.get_cp_handle(context.author.id, "cf")
         subs = await self.cp_api.fetch_user_submission(handle)
         problem_id = await self.bot.database.get_daily_problem()
@@ -504,7 +505,7 @@ class CP(commands.Cog, name="cp"):
                 
 
   
-                if today - last_submit_date  > 172800:
+                if today - last_submit_date > (repeat_time):
                     await self.bot.database.update_user_streak(user_id, today, 1, solved_problems + 1)
                     self.bot.logger.info(f"Manual submit: User {handle} completed {problem_id} (streak reset to 1)")
                 elif today == last_submit_date:
@@ -533,36 +534,36 @@ class CP(commands.Cog, name="cp"):
         name = "daily"
     )
     async def set_daily_manually(self, context:Context, problem=None):
-        self.bot.logger.info("Daily command triggered manually")
+        self.bot.logger.info("Weekly command triggered manually")
         problem = await self.bot.database.get_daily_problem()
         
         # Check if problem has the expected structure
         if not problem or len(problem) < 3:
-            await context.reply("❌ No daily problem found or data is incomplete.")
+            await context.reply("❌ No weekly problem found or data is incomplete.")
             return
 
         today = int(time.time() // 86400 * 86400)
         last_day = int(problem[0])
-        if (today - last_day) >= 86400:
-            self.bot.logger.info("Generating new daily problem")
+        if (today - last_day) >= (repeat_time):
+            self.bot.logger.info("Generating new weekly problem")
             await self._daily_problem_task()
         else:
             id = self.__convert_id(problem[1], problem[2])
             with open("data/json/problems.json") as f:
                 data = json.loads(f.read())
             problem = data[id]
-            self.bot.logger.info(f"Displaying current daily problem: {id}")
+            self.bot.logger.info(f"Displaying current weekly problem: {id}")
             await context.reply(embed=self.__embedding_cf(problem)) 
 
 
     async def _daily_problem_task(self):
-        self.bot.logger.info("Starting daily problem task")
+        self.bot.logger.info("Starting weekly problem task")
         problem = await self.cp_api.random_problem()
         channels_id = await self.bot.database.get_all_cp_channel()
         today = int(time.time() // 86400 * 86400)
         problem_id = f"{problem['contestId']}{problem['index']}"
         await self.bot.database.add_daily_problem(today,problem_id,problem["platform"])
-        self.bot.logger.info(f"Daily problem set: {problem_id} ({problem['platform']}) - sending to {len(channels_id)} channels")
+        self.bot.logger.info(f"Weekly problem set: {problem_id} ({problem['platform']}) - sending to {len(channels_id)} channels")
 
 
         for channel_id in channels_id:
@@ -573,7 +574,7 @@ class CP(commands.Cog, name="cp"):
                 embed = self.__embedding_cf(problem)
 
                 embed.set_author(
-                    name="📅 Daily CP Challenge", 
+                    name="📅 Weekly CP Challenge", 
                     icon_url="https://cdn-icons-png.flaticon.com/512/4251/4251963.png" # Ví dụ icon lịch
                 )
 
@@ -583,6 +584,8 @@ class CP(commands.Cog, name="cp"):
 
     @tasks.loop(time=daily_problem_time)
     async def daily_problem(self) -> None:
+        if datetime.datetime.now().weekday() != 0:
+            return
         await self._daily_problem_task()
 
     @daily_problem.before_loop
@@ -595,14 +598,11 @@ class CP(commands.Cog, name="cp"):
         if datetime.datetime.now().weekday() != 0:
             return
         self.bot.logger.info("Starting weekly problems update")
-        if datetime.datetime.now().weekday() == 5:
-            self.cp_api.build_dynamic_weight_map(0.41, 1800)
-        else:
-            self.cp_api.build_dynamic_weight_map(0.36, 1500)
-        await self.cp_api.update_data()
+        self.cp_api.update_data()
+        self.cp_api.build_dynamic_weight_map(0.41, 1800)
     
     @update_problems.before_loop
-    async def before_daily_problem(self) -> None:
+    async def before_update_problems(self) -> None:
         await self.bot.wait_until_ready()
                         
 
@@ -643,8 +643,8 @@ class CP(commands.Cog, name="cp"):
             value=(
                 "`/cp random` - Get a random weighted CP problem\n"
                 "`/cp truerandom` - Get a completely random CP problem\n"
-                "`/cp daily` - Show today's daily CP challenge\n"
-                "`/cp submit` - Check if you solved today's problem\n"
+                "`/cp daily` - Show this week's weekly CP challenge\n"
+                "`/cp submit` - Check if you solved this week's problem\n"
             ),
             inline=False
         )
@@ -672,8 +672,8 @@ class CP(commands.Cog, name="cp"):
             name="📌 Notes",
             value=(
                 "• **Platforms**: `cf` = Codeforces, `at` = AtCoder\n"
-                "• **Daily Problems**: Automatically posted daily, check with `/cp submit`\n"
-                "• **Streaks**: Your streak resets if you don't solve the daily problem\n"
+                "• **Weekly Problems**: Automatically posted weekly, check with `/cp submit`\n"
+                "• **Streaks**: Your streak resets if you don't solve the weekly problem\n"
             ),
             inline=False
         )
@@ -691,7 +691,9 @@ class CP(commands.Cog, name="cp"):
 
     @tasks.loop(time=daily_recap_time)
     async def daily_recap(self):
-        self.bot.logger.info("Starting daily recap task")
+        if datetime.datetime.now().weekday() != 0:
+            return
+        self.bot.logger.info("Starting weekly recap task")
         channels_id = await self.bot.database.get_all_cp_channel()
         today = int(time.time() // 86400 * 86400)
 
@@ -709,23 +711,23 @@ class CP(commands.Cog, name="cp"):
                 users = await self.bot.database.get_all_users_cp_streak(channel_id)
                 self.bot.logger.info(users)
                 for user in users:
-                    if today - int(user[3]) > 172800:
+                    if today - int(user[3]) > (repeat_time):
                         await self.bot.database.reset_streak(user[0])
                     else:
                         completing_user.append(user)
                 
                 if len(completing_user) == 0:
-                    await channel.send("No one completed today problems 🥺🥺🥺")
+                    await channel.send("No one completed this week's problems 🥺🥺🥺")
                     continue
 
-                lines = ["🎉 **DAILY CHALLENGE RESULTS** 🎉"]
+                lines = ["🎉 **WEEKLY CHALLENGE RESULTS** 🎉"]
                 for user in completing_user:
                     lines.append(f"<@{user[0]}> is on a {user[2]} days streak.")
                 lines.append("Congrats ₍^ >ヮ<^₎")
                 final_content = "\n".join(lines)
                 await channel.send(final_content)
             except Exception as e:
-                self.bot.logger.exception(f"Error while sending daily recap to channel {channel_id}: {e}")
+                self.bot.logger.exception(f"Error while sending weekly recap to channel {channel_id}: {e}")
 
     @daily_recap.before_loop
     async def before_daily_recap(self) -> None:
@@ -764,7 +766,7 @@ class CP(commands.Cog, name="cp"):
             
             problem_data = await self.bot.database.get_daily_problem()
             if not problem_data:
-                self.bot.logger.warning("No daily problem found")
+                self.bot.logger.warning("No weekly problem found")
                 return
             
             # Only check CF problems
@@ -824,7 +826,7 @@ class CP(commands.Cog, name="cp"):
                                     # Send notification to channel
                                     user_mention = f"<@{user_id}>"
                                     embed = discord.Embed(
-                                        title="✅ Daily Challenge Completed!",
+                                        title="✅ Weekly Challenge Completed!",
                                         description=f"{user_mention} has completed today's problem! Keep it up!",
                                         color=0x00FF00
                                     )
@@ -836,7 +838,7 @@ class CP(commands.Cog, name="cp"):
                                         streak = user_streak_data[0]
                                         solved_problems = user_streak_data[2]
                                         
-                                        if today - last_submit_date > 172800:
+                                        if today - last_submit_date > (repeat_time):
                                             # Streak broken, reset to 1
                                             await self.bot.database.update_user_streak(user_id, today, 1, solved_problems + 1)
                                             self.bot.logger.info(f"CF: User {handle} completed {problem_id} (streak reset to 1)")
@@ -896,14 +898,14 @@ class CP(commands.Cog, name="cp"):
             
             problem_data = await self.bot.database.get_daily_problem()
             if not problem_data:
-                self.bot.logger.warning("No daily problem found for AtCoder auto-check")
+                self.bot.logger.warning("No weekly problem found for AtCoder auto-check")
                 return
             
             self.bot.logger.debug(f"Problem data retrieved: {problem_data}")
             
             # Only process AtCoder problems
             if problem_data[2] != "at":
-                self.bot.logger.debug(f"Daily problem is not AtCoder (platform: {problem_data[2]}), skipping")
+                self.bot.logger.debug(f"Weekly problem is not AtCoder (platform: {problem_data[2]}), skipping")
                 return
             
             problem_id = problem_data[1]
@@ -975,8 +977,8 @@ class CP(commands.Cog, name="cp"):
                                 # Send notification to channel
                                 user_mention = f"<@{user_id}>"
                                 embed = discord.Embed(
-                                    title="✅ AtCoder Daily Challenge Completed!",
-                                    description=f"{user_mention} has completed today's AtCoder problem! Sugoi!",
+                                    title="✅ AtCoder Weekly Challenge Completed!",
+                                    description=f"{user_mention} has completed today's AtCoder problem!",
                                     color=0x00FF00
                                 )
                                 
@@ -991,7 +993,7 @@ class CP(commands.Cog, name="cp"):
                                     
                                     self.bot.logger.debug(f"User {handle} streak details - current: {streak}, solved: {solved_problems}, last_submit: {last_submit_date}, today: {today}")
                                     
-                                    if today - last_submit_date > 172800:
+                                    if today - last_submit_date > (repeat_time):
                                         # Streak broken, reset to 1
                                         await self.bot.database.update_user_streak(user_id, today, 1, solved_problems + 1)
                                         self.bot.logger.info(f"AT: User {handle} completed {problem_id} (streak reset to 1)")
